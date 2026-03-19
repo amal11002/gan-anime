@@ -1,0 +1,19 @@
+# Modèles entraînés
+*.pth
+*.pt
+
+# Datasets
+*.zip
+data/
+datasets/
+images/
+
+# Jupyter
+.ipynb_checkpoints/
+
+# Python
+__pycache__/
+*.pyc
+
+# Environnement virtuel
+venv/
