@@ -1,5 +1,4 @@
 import os
-import io
 import clip
 import torch
 import torch.nn as nn
@@ -12,7 +11,7 @@ from pathlib import Path
 from torch.utils.data import Dataset, DataLoader
 from torchvision import transforms
 
-# ── Configuration ─────────────────────────────────────────────────────────────
+# ── Configuration 
 DEVICE      = "cuda" if torch.cuda.is_available() else "cpu"
 LATENT_DIM  = 100
 EMBED_DIM   = 512
@@ -20,8 +19,8 @@ IMAGE_SIZE  = 64
 BATCH_SIZE  = 64
 LR          = 0.0002
 BETAS       = (0.5, 0.999)
-EPOCHS      = 100
-MAX_SAMPLES = 20000
+EPOCHS      = 50
+MAX_SAMPLES = 10000
 CSV_PATH    = "/content/drive/MyDrive/gan-anime/phase4_text2image/all_data.csv"
 SAVE_DIR    = "/content/drive/MyDrive/gan-anime/phase4_text2image/output"
 CACHE_DIR   = "/content/drive/MyDrive/gan-anime/phase4_text2image/cache"
@@ -32,25 +31,25 @@ print(f"Device : {DEVICE}")
 
 # ── Dataset 
 class SafebooruDataset(Dataset):
-    def __init__(self, csv_path, max_samples=20000, transform=None):
-        self.transform  = transform
-        self.cache_dir  = Path(CACHE_DIR)
-        self.data       = []
+    def __init__(self, csv_path, max_samples=10000, transform=None):
+        self.transform = transform
+        self.cache_dir = Path(CACHE_DIR)
+        self.data      = []
 
         print("Lecture du CSV...")
         df = pd.read_csv(csv_path, usecols=["sample_url", "tags"])
         df = df.dropna(subset=["sample_url", "tags"])
-        df = df.head(max_samples * 3)  # marge pour les erreurs de téléchargement
+        df = df.head(max_samples * 3)
 
-        print(f"Téléchargement des images (max {max_samples})...")
+        print(f"Chargement des images (max {max_samples})...")
         count = 0
         for _, row in df.iterrows():
             if count >= max_samples:
                 break
 
-            url      = "https:" + row["sample_url"]
-            tags     = row["tags"]
-            filename = url.split("/")[-1]
+            url        = "https:" + row["sample_url"]
+            tags       = row["tags"]
+            filename   = url.split("/")[-1]
             cache_path = self.cache_dir / filename
 
             # Télécharger seulement si pas déjà en cache
@@ -87,8 +86,6 @@ class SafebooruDataset(Dataset):
             image = Image.new("RGB", (IMAGE_SIZE, IMAGE_SIZE))
         if self.transform:
             image = self.transform(image)
-
-        # Garder les 6 premiers tags comme description
         tags = " ".join(item["tags"].split()[:6])
         return image, tags
 
@@ -160,7 +157,7 @@ def encode_text(texts, clip_model):
         embeddings = clip_model.encode_text(tokens).float()
     return embeddings
 
-# ── Sauvegarde grille
+# ── Sauvegarde grille 
 def sauvegarder_grille(G, clip_model, epoch):
     G.eval()
     test_tags = [
@@ -171,11 +168,11 @@ def sauvegarder_grille(G, clip_model, epoch):
     ]
     with torch.no_grad():
         text_embeds = encode_text(test_tags, clip_model)
-        z = torch.randn(len(test_tags), LATENT_DIM).to(DEVICE)
+        z           = torch.randn(len(test_tags), LATENT_DIM).to(DEVICE)
         fake_images = G(z, text_embeds)
 
     fake_images = (fake_images * 0.5 + 0.5).cpu()
-    fig, axes = plt.subplots(1, len(test_tags), figsize=(16, 4))
+    fig, axes   = plt.subplots(1, len(test_tags), figsize=(16, 4))
     for i, ax in enumerate(axes):
         img = np.clip(fake_images[i].permute(1, 2, 0).numpy(), 0, 1)
         ax.imshow(img)
@@ -201,6 +198,16 @@ def train():
     G = Generator(LATENT_DIM, EMBED_DIM).to(DEVICE)
     D = Discriminator(EMBED_DIM).to(DEVICE)
 
+    # ── Reprise depuis checkpoint si disponible
+    checkpoint_g = f"{SAVE_DIR}/generator.pth"
+    checkpoint_d = f"{SAVE_DIR}/discriminator.pth"
+    if os.path.exists(checkpoint_g) and os.path.exists(checkpoint_d):
+        G.load_state_dict(torch.load(checkpoint_g, map_location=DEVICE))
+        D.load_state_dict(torch.load(checkpoint_d, map_location=DEVICE))
+        print("Checkpoint chargé — reprise de l'entraînement")
+    else:
+        print("Entraînement from scratch")
+
     opt_G     = torch.optim.Adam(G.parameters(), lr=LR, betas=BETAS)
     opt_D     = torch.optim.Adam(D.parameters(), lr=LR, betas=BETAS)
     criterion = nn.BCELoss()
@@ -210,11 +217,11 @@ def train():
 
     for epoch in range(EPOCHS):
         for real_images, tags in dataloader:
-            real_images  = real_images.to(DEVICE)
-            batch_size   = real_images.size(0)
-            text_embeds  = encode_text(list(tags), clip_model)
-            real_labels  = torch.ones(batch_size, 1).to(DEVICE)
-            fake_labels  = torch.zeros(batch_size, 1).to(DEVICE)
+            real_images = real_images.to(DEVICE)
+            batch_size  = real_images.size(0)
+            text_embeds = encode_text(list(tags), clip_model)
+            real_labels = torch.ones(batch_size, 1).to(DEVICE)
+            fake_labels = torch.zeros(batch_size, 1).to(DEVICE)
 
             # Discriminator
             opt_D.zero_grad()
@@ -236,13 +243,13 @@ def train():
         losses_D.append(loss_D.item())
         print(f"Epoch [{epoch+1}/{EPOCHS}] | Loss G: {loss_G.item():.4f} | Loss D: {loss_D.item():.4f}")
 
+        # Sauvegarde checkpoint à chaque epoch
+        torch.save(G.state_dict(), checkpoint_g)
+        torch.save(D.state_dict(), checkpoint_d)
+
+        # Grille toutes les 10 epochs
         if (epoch + 1) % 10 == 0:
             sauvegarder_grille(G, clip_model, epoch + 1)
-
-    # Sauvegarder modèles
-    torch.save(G.state_dict(), f"{SAVE_DIR}/generator.pth")
-    torch.save(D.state_dict(), f"{SAVE_DIR}/discriminator.pth")
-    print("Modèles sauvegardés !")
 
     # Courbes de loss
     plt.figure(figsize=(10, 4))
@@ -254,6 +261,7 @@ def train():
     plt.legend()
     plt.savefig(f"{SAVE_DIR}/losses.png")
     plt.show()
+    print("Entraînement terminé !")
 
 # ── Main 
 if __name__ == "__main__":
