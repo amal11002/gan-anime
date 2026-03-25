@@ -32,48 +32,33 @@ print(f"Device : {DEVICE}")
 # ── Dataset 
 class SafebooruDataset(Dataset):
     def __init__(self, csv_path, max_samples=10000, transform=None):
-        self.transform = transform
-        self.cache_dir = Path(CACHE_DIR)
-        self.data      = []
+      self.transform = transform
+      self.data      = []
 
-        print("Lecture du CSV...")
-        df = pd.read_csv(csv_path, usecols=["sample_url", "tags"])
-        df = df.dropna(subset=["sample_url", "tags"])
-        df = df.head(max_samples * 3)
+      print("Lecture du cache local...")
+      cache_dir = Path(CACHE_DIR)
+      extensions = ['.jpg', '.jpeg', '.png']
+      images = []
+      for ext in extensions:
+        images.extend(list(cache_dir.glob(f"*{ext}")))
 
-        print(f"Chargement des images (max {max_samples})...")
-        count = 0
-        for _, row in df.iterrows():
-            if count >= max_samples:
-                break
+    # Lire les tags depuis le CSV
+      df = pd.read_csv(csv_path, usecols=["sample_url", "tags"])
+      df = df.dropna(subset=["sample_url", "tags"])
+      tags_dict = {}
+      for _, row in df.iterrows():
+        filename = row["sample_url"].split("/")[-1]
+        tags_dict[filename] = str(row["tags"])
 
-            url        = "https:" + row["sample_url"]
-            tags       = row["tags"]
-            filename   = url.split("/")[-1]
-            cache_path = self.cache_dir / filename
+      for img_path in images[:max_samples]:
+        filename = img_path.name
+        tags     = tags_dict.get(filename, "anime face")
+        self.data.append({
+            "image_path": str(img_path),
+            "tags": tags
+        })
 
-            # Télécharger seulement si pas déjà en cache
-            if not cache_path.exists():
-                try:
-                    response = requests.get(url, timeout=10)
-                    if response.status_code == 200:
-                        with open(cache_path, "wb") as f:
-                            f.write(response.content)
-                    else:
-                        continue
-                except:
-                    continue
-
-            self.data.append({
-                "image_path": str(cache_path),
-                "tags": str(tags)
-            })
-            count += 1
-
-            if count % 500 == 0:
-                print(f"  {count}/{max_samples} images prêtes...")
-
-        print(f"Dataset prêt : {len(self.data)} images")
+      print(f"Dataset prêt : {len(self.data)} images depuis le cache")
 
     def __len__(self):
         return len(self.data)

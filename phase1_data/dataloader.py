@@ -8,10 +8,9 @@ import torch
 from torch.utils.data import Dataset, DataLoader
 from torchvision import transforms
 
-# ── Chemin vers ton dataset (téléchargé depuis Kaggle) ──────────────────────
 DATA_PATH = "phase4_text2image/data"
 
-# ── Dataset ──────────────────────────────────────────────────────────────────
+# ── Dataset 
 class AnimeDataset(Dataset):
     def __init__(self, data_path, transform=None):
         self.transform = transform
@@ -33,14 +32,14 @@ class AnimeDataset(Dataset):
             image = self.transform(image)
         return image
 
-# ── Transformation standard ───────────────────────────────────────────────────
+# ── Transformation standard 
 transform = transforms.Compose([
     transforms.Resize((64, 64)),
     transforms.ToTensor(),
     transforms.Normalize([0.5, 0.5, 0.5], [0.5, 0.5, 0.5])
 ])
 
-# ── Visualisation ─────────────────────────────────────────────────────────────
+# ── Visualisation
 def afficher_grille(data_path, save_path="phase4_text2image/apercu_dataset.png"):
     extensions = ['.jpg', '.jpeg', '.png']
     images = []
@@ -69,7 +68,7 @@ def afficher_grille(data_path, save_path="phase4_text2image/apercu_dataset.png")
     print(f"Grille sauvegardée : {save_path}")
     print("Screenshot cette image pour ton rapport !")
 
-# ── Test du DataLoader ────────────────────────────────────────────────────────
+# ── Test du DataLoader
 def tester_dataloader(data_path):
     dataset = AnimeDataset(data_path, transform=transform)
     dataloader = DataLoader(dataset, batch_size=64, shuffle=True, num_workers=0)
@@ -80,7 +79,7 @@ def tester_dataloader(data_path):
     print("DataLoader pret !")
     return dataloader
 
-# ── Main ──────────────────────────────────────────────────────────────────────
+# ── Main 
 if __name__ == "__main__":
     afficher_grille(DATA_PATH)
     dataloader = tester_dataloader(DATA_PATH)
