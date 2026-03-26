@@ -32,47 +32,61 @@ print(f"Device : {DEVICE}")
 # ── Dataset 
 class SafebooruDataset(Dataset):
     def __init__(self, csv_path, max_samples=10000, transform=None):
-      self.transform = transform
-      self.data      = []
+       self.transform = transform
+       self.data      = []
 
-      print("Lecture du cache local...")
-      cache_dir = Path(CACHE_DIR)
-      extensions = ['.jpg', '.jpeg', '.png']
-      images = []
-      for ext in extensions:
-        images.extend(list(cache_dir.glob(f"*{ext}")))
+       print("Lecture du cache local...")
+       cache_dir  = Path(CACHE_DIR)
+       extensions = ['.jpg', '.jpeg', '.png']
+       images     = []
+       for ext in extensions:
+         images.extend(list(cache_dir.glob(f"*{ext}")))
 
-    # Lire les tags depuis le CSV
-      df = pd.read_csv(csv_path, usecols=["sample_url", "tags"])
-      df = df.dropna(subset=["sample_url", "tags"])
-      tags_dict = {}
-      for _, row in df.iterrows():
-        filename = row["sample_url"].split("/")[-1]
-        tags_dict[filename] = str(row["tags"])
+       df        = pd.read_csv(csv_path, usecols=["sample_url", "tags"])
+       df        = df.dropna(subset=["sample_url", "tags"])
+       tags_dict = {}
+       for _, row in df.iterrows():
+         filename           = row["sample_url"].split("/")[-1]
+         tags_dict[filename] = str(row["tags"])
 
-      for img_path in images[:max_samples]:
-        filename = img_path.name
-        tags     = tags_dict.get(filename, "anime face")
-        self.data.append({
+       for img_path in images[:max_samples]:
+         filename = img_path.name
+         tags     = tags_dict.get(filename, "anime face")
+         self.data.append({
             "image_path": str(img_path),
-            "tags": tags
+            "tags"      : tags
         })
 
-      print(f"Dataset prêt : {len(self.data)} images depuis le cache")
+       print(f"Dataset prêt : {len(self.data)} images depuis le cache")
 
-    def __len__(self):
-        return len(self.data)
+    # Pré-calculer tous les embeddings CLIP une seule fois
+       print("Pré-calcul des embeddings CLIP...")
+       clip_model, _ = clip.load("ViT-B/32", device=DEVICE)
+       clip_model.eval()
+       all_tags    = [" ".join(d["tags"].split()[:6]) for d in self.data]
+       self.embeds = []
+       batch_size  = 256
+       with torch.no_grad():
+         for i in range(0, len(all_tags), batch_size):
+            batch_tags    = all_tags[i:i+batch_size]
+            tokens        = clip.tokenize(batch_tags, truncate=True).to(DEVICE)
+            batch_embeds  = clip_model.encode_text(tokens).float().cpu()
+            self.embeds.extend(batch_embeds)
+            if i % 2000 == 0:
+                print(f"  {i}/{len(all_tags)} embeddings calculés...")
+       print("Embeddings prêts !")
+
 
     def __getitem__(self, idx):
-        item = self.data[idx]
-        try:
-            image = Image.open(item["image_path"]).convert("RGB")
-        except:
-            image = Image.new("RGB", (IMAGE_SIZE, IMAGE_SIZE))
-        if self.transform:
-            image = self.transform(image)
-        tags = " ".join(item["tags"].split()[:6])
-        return image, tags
+          item = self.data[idx]
+          try:
+           image = Image.open(item["image_path"]).convert("RGB")
+          except:
+           image = Image.new("RGB", (IMAGE_SIZE, IMAGE_SIZE))
+          if self.transform:
+           image = self.transform(image)
+    # Retourner l'embedding pré-calculé
+          return image, self.embeds[idx]
 
 transform = transforms.Compose([
     transforms.Resize((IMAGE_SIZE, IMAGE_SIZE)),
@@ -183,7 +197,6 @@ def train():
     G = Generator(LATENT_DIM, EMBED_DIM).to(DEVICE)
     D = Discriminator(EMBED_DIM).to(DEVICE)
 
-    # ── Reprise depuis checkpoint si disponible
     checkpoint_g = f"{SAVE_DIR}/generator.pth"
     checkpoint_d = f"{SAVE_DIR}/discriminator.pth"
     if os.path.exists(checkpoint_g) and os.path.exists(checkpoint_d):
@@ -201,10 +214,11 @@ def train():
     print(f"Début entraînement : {EPOCHS} epochs sur {DEVICE}")
 
     for epoch in range(EPOCHS):
-        for real_images, tags in dataloader:
+        for real_images, text_embeds in dataloader:
             real_images = real_images.to(DEVICE)
+            # Embeddings déjà calculés, juste les envoyer sur GPU
+            text_embeds = text_embeds.to(DEVICE)
             batch_size  = real_images.size(0)
-            text_embeds = encode_text(list(tags), clip_model)
             real_labels = torch.ones(batch_size, 1).to(DEVICE)
             fake_labels = torch.zeros(batch_size, 1).to(DEVICE)
 
@@ -228,15 +242,12 @@ def train():
         losses_D.append(loss_D.item())
         print(f"Epoch [{epoch+1}/{EPOCHS}] | Loss G: {loss_G.item():.4f} | Loss D: {loss_D.item():.4f}")
 
-        # Sauvegarde checkpoint à chaque epoch
         torch.save(G.state_dict(), checkpoint_g)
         torch.save(D.state_dict(), checkpoint_d)
 
-        # Grille toutes les 10 epochs
         if (epoch + 1) % 10 == 0:
             sauvegarder_grille(G, clip_model, epoch + 1)
 
-    # Courbes de loss
     plt.figure(figsize=(10, 4))
     plt.plot(losses_G, label="Generator")
     plt.plot(losses_D, label="Discriminator")
